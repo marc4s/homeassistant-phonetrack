@@ -228,12 +228,19 @@ class PhoneTrackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle reconfiguration of the integration."""
         _LOGGER.debug("async_step_reconfigure called with user_input: %s", user_input)
         
-        try:
-            reconfigure_entry = self._async_get_entry()
-        except Exception as err:
-            _LOGGER.error("Failed to get reconfigure entry: %s", err)
-            return self.async_abort(reason="reconfigure_failed")
-
+        # Get entry_id from the context
+        entry_id = self.context.get("entry_id")
+        _LOGGER.debug("Entry ID from context: %s", entry_id)
+        
+        if entry_id is None:
+            _LOGGER.error("No entry_id provided for reconfigure")
+            return self.async_abort(reason="no_entry_id")
+        
+        reconfigure_entry = self.hass.config_entries.async_get_entry(entry_id)
+        if reconfigure_entry is None:
+            _LOGGER.error("Entry not found for reconfigure: %s", entry_id)
+            return self.async_abort(reason="entry_not_found")
+        
         _LOGGER.debug("Reconfigure entry data: %s", reconfigure_entry.data)
 
         errors = {}
