@@ -10,7 +10,11 @@ https://community.home-assistant.io/t/custom-device-tracker-not-firing-at-expect
 
 I just took his code, converted it top the new(er) structure and adjusted it heavily inspired by the Google Shared Location device tracker.
 
-ALL credits go to @Phyks here. Released this updated coded under Apache 2.0 to protect his code a bit as he did not stated a license at all.
+- credits go to @Phyks here. Released this updated coded under Apache 2.0 to protect his code a bit as he did not stated a license at all.
+
+2026-11 and credits to j1nx for the initial phonetrack component for homeassistant. as this gets incompatible in homeassistant with 2027.5 I made some changes
+
+regards
 
 ## Setup instructions
 ### Copying into custom_components folder
@@ -29,23 +33,10 @@ The result of your copy action(s) should yield a directory structure like so:
 ```
 
 ### Enabling the custom_component
-In order to enable this custom device_tracker component, add this code snippet to your Home-Assistant `configuration.yaml` file:
+- manually remove the old phonetrack component from custom_components and comment out your old configuration from configuration.yaml
+- install via marketplace
+- use the setup flow
 
-```yaml
-device_tracker:
-  - platform: phonetrack
-    url: https://<NEXTCLOUD_URL>/index.php/apps/phonetrack/api/getlastpositions/
-    token: <SHARED_VIEW_TOKEN>
-
-    # Optional. Default is 5 minutes.
-    update_time_minutes: 0 
-    update_time_seconds: 30
-    
-    devices:
-      - <DEVICE_NAME>
-```
-
-Please use [secrets](https://www.home-assistant.io/docs/configuration/secrets/) within Home-Assistant to store sensitive data like API Tokens.
 
 ## ✅ Completed Improvements
 
@@ -67,7 +58,3 @@ Additional improvements for the future:
 - Device registry integration enhancements
 - More detailed error handling and recovery
 
-## Troubleshooting
-I don't know how to code in Python (yet). This is just copy & paste work and using Google (a lot) debugging all errors I do not understand, while doing stuff I don't know. I have some more Python projects on the shelf, so whenever I start leaning that code a bit more, I will look into making it better.
-
-Till then, feel free to fork and create PRs.
