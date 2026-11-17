@@ -50,17 +50,35 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up PhoneTrack device tracker from a config entry."""
+    _LOGGER.debug("Setting up PhoneTrack device tracker")
+    _LOGGER.debug("Entry data: %s", entry.data)
+
     # Get configuration from config entry
     config = entry.data
+    devices = config.get(CONF_DEVICES, [])
+
+    _LOGGER.debug("Configured devices: %s", devices)
+
+    # Validate devices list
+    if not devices:
+        _LOGGER.warning("No devices configured, no entities will be created")
+        return
+
+    if not isinstance(devices, list):
+        _LOGGER.error("Devices must be a list, got %s", type(devices))
+        return
 
     # Create coordinator for managing updates
+    _LOGGER.debug("Creating DataUpdateCoordinator")
     coordinator = PhoneTrackDataUpdateCoordinator(hass, config)
 
     # Create entity for each device
     entities = []
-    for device in config[CONF_DEVICES]:
+    for device in devices:
+        _LOGGER.debug("Creating entity for device: %s", device)
         entities.append(PhoneTrackDevice(coordinator, device, entry.entry_id))
 
+    _LOGGER.info("Adding %d device tracker entities", len(entities))
     async_add_entities(entities, True)
 
 
@@ -111,7 +129,7 @@ class PhoneTrackDataUpdateCoordinator(DataUpdateCoordinator):
         self.config = config
         self.url = config[CONF_URL]
         self.token = config[CONF_TOKEN]
-        self.devices = config[CONF_DEVICES]
+        self.devices = config.get(CONF_DEVICES, [])
         self.max_gps_accuracy = config.get(
             CONF_MAX_GPS_ACCURACY, DEFAULT_MAX_GPS_ACCURACY
         )
@@ -119,9 +137,15 @@ class PhoneTrackDataUpdateCoordinator(DataUpdateCoordinator):
             CONF_RECONNECT_INTERVAL, DEFAULT_RECONNECT_INTERVAL
         )
         self._connected = True  # Start assuming connected
+        _LOGGER.debug(
+            "Coordinator initialized with URL: %s, devices: %s",
+            self.url,
+            self.devices,
+        )
 
     async def _async_update_data(self) -> dict[str, Any]:
         """Update data from the PhoneTrack server."""
+        _LOGGER.debug("Updating data from PhoneTrack server")
         import asyncio
 
         # Use asyncio.to_thread for sync requests
@@ -141,6 +165,7 @@ class PhoneTrackDataUpdateCoordinator(DataUpdateCoordinator):
                 )
                 raise UpdateFailed(f"Missing token data in server response")
 
+            _LOGGER.debug("Successfully updated data for %d devices", len(data[self.token]))
             return data[self.token]
 
         except requests.exceptions.RequestException as err:
@@ -152,12 +177,11 @@ class PhoneTrackDataUpdateCoordinator(DataUpdateCoordinator):
                     err,
                 )
                 self._connected = False
-
-            # If we were connected, schedule a reconnection attempt
-            if not self._connected:
+            else:
                 _LOGGER.debug(
-                    "Reconnection attempt scheduled in %d seconds",
+                    "Still disconnected from PhoneTrack server (retry in %ds): %s",
                     self.reconnect_interval,
+                    err,
                 )
 
             raise UpdateFailed(f"Error fetching PhoneTrack data: {err}") from err
@@ -183,6 +207,11 @@ class PhoneTrackDevice(CoordinatorEntity, TrackerEntity):
             "name": device,
             "manufacturer": "PhoneTrack",
         }
+        _LOGGER.debug(
+            "Initialized PhoneTrackDevice for %s with unique_id: %s",
+            device,
+            self._attr_unique_id,
+        )
 
     @property
     def available(self) -> bool:
@@ -238,8 +267,12 @@ class PhoneTrackDevice(CoordinatorEntity, TrackerEntity):
     def _async_update_attrs(self) -> None:
         """Update attributes from coordinator data."""
         if self.coordinator.data is None:
+            _LOGGER.debug("Coordinator data is None, skipping update for %s", self.device)
             return
         if self.device not in self.coordinator.data:
+            _LOGGER.debug(
+                "Device %s not in coordinator data, skipping update", self.device
+            )
             return
 
         device_data = self.coordinator.data[self.device]
@@ -258,6 +291,7 @@ class PhoneTrackDevice(CoordinatorEntity, TrackerEntity):
             )
             return
 
+        _LOGGER.debug("Updated attributes for %s", self.device)
         self.async_write_ha_state()
 
     async def async_added_to_hass(self) -> None:

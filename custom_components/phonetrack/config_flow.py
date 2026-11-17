@@ -3,7 +3,7 @@ import logging
 
 import voluptuous as vol
 from homeassistant import config_entries
-from homeassistant.const import CONF_TOKEN, CONF_URL
+from homeassistant.const import CONF_DEVICES, CONF_TOKEN, CONF_URL
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 import requests
@@ -94,28 +94,45 @@ class PhoneTrackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, user_input: dict | None = None
     ) -> FlowResult:
         """Handle the initial step."""
+        _LOGGER.debug("async_step_user called with user_input: %s", user_input)
         errors = {}
 
         if user_input is not None:
             try:
+                _LOGGER.debug("Validating input...")
                 info = await validate_input(self.hass, user_input)
+                _LOGGER.debug("Input validated: %s", info)
+                
+                _LOGGER.debug("Fetching available devices...")
                 devices = await async_get_available_devices(
                     self.hass, user_input[CONF_URL], user_input[CONF_TOKEN]
                 )
-            except CannotConnect:
+                _LOGGER.debug("Available devices: %s", devices)
+            except CannotConnect as err:
+                _LOGGER.error("Cannot connect to PhoneTrack server: %s", err)
                 errors["base"] = "cannot_connect"
-            except InvalidUrl:
+            except InvalidUrl as err:
+                _LOGGER.error("Invalid URL: %s", err)
                 errors["base"] = "invalid_url"
-            except Exception:  # pylint: disable=broad-except
+            except Exception as err:  # pylint: disable=broad-except
+                _LOGGER.exception(
+                    "Unexpected error during configuration: %s", err
+                )
                 errors["base"] = "unknown"
             else:
                 # Store devices as a list
                 user_input[CONF_DEVICES] = devices
+                _LOGGER.info(
+                    "Configuration successful. URL: %s, Devices: %s",
+                    user_input[CONF_URL],
+                    devices,
+                )
                 return self.async_create_entry(
                     title=info["title"],
                     data=user_input,
                 )
 
+        _LOGGER.debug("Showing form with errors: %s", errors)
         return self.async_show_form(
             step_id="user", data_schema=DATA_SCHEMA, errors=errors
         )
@@ -124,24 +141,40 @@ class PhoneTrackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, user_input: dict | None = None
     ) -> FlowResult:
         """Handle reconfiguration of the integration."""
+        _LOGGER.debug("async_step_reconfigure called with user_input: %s", user_input)
         reconfigure_entry = self._async_get_entry()
 
         errors = {}
         if user_input is not None:
             try:
+                _LOGGER.debug("Validating reconfiguration input...")
                 info = await validate_input(self.hass, user_input)
+                _LOGGER.debug("Reconfiguration input validated: %s", info)
+                
+                _LOGGER.debug("Fetching available devices for reconfiguration...")
                 devices = await async_get_available_devices(
                     self.hass, user_input[CONF_URL], user_input[CONF_TOKEN]
                 )
-            except CannotConnect:
+                _LOGGER.debug("Available devices: %s", devices)
+            except CannotConnect as err:
+                _LOGGER.error("Cannot connect to PhoneTrack server during reconfigure: %s", err)
                 errors["base"] = "cannot_connect"
-            except InvalidUrl:
+            except InvalidUrl as err:
+                _LOGGER.error("Invalid URL during reconfiguration: %s", err)
                 errors["base"] = "invalid_url"
-            except Exception:  # pylint: disable=broad-except
+            except Exception as err:  # pylint: disable=broad-except
+                _LOGGER.exception(
+                    "Unexpected error during reconfiguration: %s", err
+                )
                 errors["base"] = "unknown"
             else:
                 # Store devices as a list
                 user_input[CONF_DEVICES] = devices
+                _LOGGER.info(
+                    "Reconfiguration successful. URL: %s, Devices: %s",
+                    user_input[CONF_URL],
+                    devices,
+                )
                 self.hass.config_entries.async_update_entry(
                     reconfigure_entry,
                     data=user_input,
@@ -187,6 +220,7 @@ class PhoneTrackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             }
         )
 
+        _LOGGER.debug("Showing reconfigure form with errors: %s", errors)
         return self.async_show_form(
             step_id="reconfigure", data_schema=data_schema, errors=errors
         )
