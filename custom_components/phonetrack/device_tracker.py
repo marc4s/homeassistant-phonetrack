@@ -1,126 +1,270 @@
-"""Support for PhoneTrack device tracking."""
+"""Support for PhoneTrack device tracking using modern API."""
 import logging
 import urllib.parse
 from datetime import timedelta
 from typing import Any
 
-import homeassistant.helpers.config_validation as cv  # type: ignore[import]
-import requests  # type: ignore[import]
-import voluptuous as vol  # type: ignore[import]
-from homeassistant.components.device_tracker import (  # type: ignore[import]
-    PLATFORM_SCHEMA,
-    SourceType,
-    SeeCallback,
+import requests
+from homeassistant.components.device_tracker import TrackerEntity
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.helpers.update_coordinator import (
+    CoordinatorEntity,
+    DataUpdateCoordinator,
+    UpdateFailed,
 )
-from homeassistant.const import CONF_DEVICES  # type: ignore[import]
-from homeassistant.const import CONF_TOKEN, CONF_URL
-from homeassistant.core import HomeAssistant  # type: ignore[import]
-from homeassistant.helpers.event import track_time_interval  # type: ignore[import]
-from homeassistant.helpers.typing import ConfigType  # type: ignore[import]
-from homeassistant.helpers.typing import DiscoveryInfoType
-from homeassistant.util import Throttle, slugify  # type: ignore[import]
+
+from .const import (
+    CONF_DEVICES,
+    CONF_MAX_GPS_ACCURACY,
+    CONF_RECONNECT_INTERVAL,
+    CONF_TOKEN,
+    CONF_URL,
+    CONF_UPDATE_TIME_MINUTES,
+    CONF_UPDATE_TIME_SECONDS,
+    DEFAULT_MAX_GPS_ACCURACY,
+    DEFAULT_RECONNECT_INTERVAL,
+    DEFAULT_UPDATE_TIME_MINUTES,
+    DEFAULT_UPDATE_TIME_SECONDS,
+    DOMAIN,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
-CONF_MAX_GPS_ACCURACY = "max_gps_accuracy"
-CONF_UPDATE_TIME_MINUTES = "update_time_minutes"
-CONF_UPDATE_TIME_SECONDS = "update_time_seconds"
+# Mapping from old config keys to new config entry data keys
+CONFIG_KEYS = [
+    CONF_DEVICES,
+    CONF_TOKEN,
+    CONF_URL,
+    CONF_MAX_GPS_ACCURACY,
+    CONF_UPDATE_TIME_MINUTES,
+    CONF_UPDATE_TIME_SECONDS,
+    CONF_RECONNECT_INTERVAL,
+]
 
-PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
-    {
-        vol.Required(CONF_DEVICES, default=[]): vol.All(cv.ensure_list, [cv.string]),
-        vol.Required(CONF_TOKEN, default=""): cv.string,
-        vol.Required(CONF_URL, default=""): cv.string,
-        vol.Optional(CONF_MAX_GPS_ACCURACY, default=100000): vol.Coerce(float),
-        vol.Optional(CONF_UPDATE_TIME_SECONDS, default=0): vol.Coerce(float),
-        vol.Optional(CONF_UPDATE_TIME_MINUTES, default=5): vol.Coerce(float),
-    }
-)
 
-def setup_scanner(
+async def async_setup_entry(
     hass: HomeAssistant,
-    config: ConfigType,
-    see: SeeCallback,
-    _: DiscoveryInfoType | None = None,
-) -> bool:
-    """Set up the PhoneTrack scanner."""
-    config_check = {
-        CONF_URL: "URL",
-        CONF_TOKEN: "Token",
-        CONF_DEVICES: "Device list",
-    }
+    entry: ConfigEntry,
+    async_add_entities: AddConfigEntryEntitiesCallback,
+) -> None:
+    """Set up PhoneTrack device tracker from a config entry."""
+    # Get configuration from config entry
+    config = entry.data
 
-    for key, item in config_check.items():
-        if not config[key]:
-            _LOGGER.error("%s missing from configuration", item)
-            return False
+    # Create coordinator for managing updates
+    coordinator = PhoneTrackDataUpdateCoordinator(hass, config)
 
-    PhoneTrackDeviceTracker(hass, config, see)
+    # Create entity for each device
+    entities = []
+    for device in config[CONF_DEVICES]:
+        entities.append(PhoneTrackDevice(coordinator, device, entry.entry_id))
+
+    async_add_entities(entities, True)
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate old config entry to new format."""
+    _LOGGER.debug("Migrating from entry version %s", entry.version)
+
+    if entry.version == 1:
+        # Migrate from legacy platform format to config entry
+        # This handles migration from the old setup_scanner approach
+        new_data = {**entry.data}
+
+        # Add default reconnect interval if not present
+        if CONF_RECONNECT_INTERVAL not in new_data:
+            new_data[CONF_RECONNECT_INTERVAL] = DEFAULT_RECONNECT_INTERVAL
+
+        # Update the config entry
+        hass.config_entries.async_update_entry(
+            entry,
+            data=new_data,
+            version=entry.version,
+            minor_version=entry.minor_version + 1,
+        )
+
+        _LOGGER.debug("Migration to entry version %s successful", entry.version)
+
     return True
 
 
-class PhoneTrackDeviceTracker:  # pylint: disable=too-few-public-methods
-    """
-    A device tracker fetching last position from the PhoneTrack Nextcloud
-    app.
-    """
+class PhoneTrackDataUpdateCoordinator(DataUpdateCoordinator):
+    """Class to manage fetching PhoneTrack data from the server."""
 
     def __init__(
         self,
         hass: HomeAssistant,
-        config: ConfigType,
-        see: SeeCallback,
+        config: dict[str, Any],
     ) -> None:
-        """Initialize the PhoneTrack tracking."""
-        self.hass = hass
+        """Initialize the coordinator."""
+        super().__init__(
+            hass,
+            _LOGGER,
+            name=DOMAIN,
+            update_interval=timedelta(
+                minutes=config.get(CONF_UPDATE_TIME_MINUTES, DEFAULT_UPDATE_TIME_MINUTES),
+                seconds=config.get(CONF_UPDATE_TIME_SECONDS, DEFAULT_UPDATE_TIME_SECONDS),
+            ),
+        )
+        self.config = config
         self.url = config[CONF_URL]
         self.token = config[CONF_TOKEN]
         self.devices = config[CONF_DEVICES]
-        self.max_gps_accuracy = config[CONF_MAX_GPS_ACCURACY]
-        self.update_time_minutes = config[CONF_UPDATE_TIME_MINUTES]
-        self.update_time_seconds = config[CONF_UPDATE_TIME_SECONDS]
-        self.see = see
-        self._update_info()
+        self.max_gps_accuracy = config.get(
+            CONF_MAX_GPS_ACCURACY, DEFAULT_MAX_GPS_ACCURACY
+        )
+        self.reconnect_interval = config.get(
+            CONF_RECONNECT_INTERVAL, DEFAULT_RECONNECT_INTERVAL
+        )
+        self._connected = True  # Start assuming connected
 
-        self.update_interval = timedelta(minutes=self.update_time_minutes, seconds=self.update_time_seconds)
+    async def _async_update_data(self) -> dict[str, Any]:
+        """Update data from the PhoneTrack server."""
+        import asyncio
 
-        # Initial call to update information
-        self._update_info()
+        # Use asyncio.to_thread for sync requests
+        def fetch_data():
+            url = urllib.parse.urljoin(self.url, self.token)
+            response = requests.get(url, timeout=30)
+            response.raise_for_status()
+            return response.json()
 
-        # Schedule the periodic update
-        track_time_interval(hass, self._update_info, self.update_interval)
+        try:
+            data = await asyncio.to_thread(fetch_data)
 
-    def _update_info(self, *_: Any, **__: Any) -> bool:
-        """Update the device info."""
-        _LOGGER.debug("Updating devices")
-        data = requests.get(
-            urllib.parse.urljoin(self.url, self.token),
-            timeout=30,
-        ).json()
-        data = data[self.token]
-        for device in self.devices:
-            if device not in data.keys():
-                _LOGGER.info("Device %s is not available.", device)
-                continue
-            lat, lon = data[device]["lat"], data[device]["lon"]
-            accuracy = data[device]["accuracy"]
-            battery = data[device]["batterylevel"]
-            if (
-                self.max_gps_accuracy is not None
-                and data[device]["accuracy"] > self.max_gps_accuracy
-            ):
-                _LOGGER.info(
-                    "Ignoring %s update because expected GPS accuracy is not met",
-                    device,
+            # Check if the response contains the expected token data
+            if self.token not in data:
+                _LOGGER.error(
+                    "Server response does not contain expected token data: %s", self.token
                 )
-                continue
+                raise UpdateFailed(f"Missing token data in server response")
 
-            self.see(
-                dev_id=slugify(device),
-                gps=(lat, lon),
-                source_type=SourceType.GPS,
-                gps_accuracy=accuracy,
-                battery=battery,
+            return data[self.token]
+
+        except requests.exceptions.RequestException as err:
+            # Handle connection errors
+            if self._connected:
+                _LOGGER.warning(
+                    "Cannot connect to PhoneTrack server (will retry in %ds): %s",
+                    self.reconnect_interval,
+                    err,
+                )
+                self._connected = False
+
+            # If we were connected, schedule a reconnection attempt
+            if not self._connected:
+                _LOGGER.debug(
+                    "Reconnection attempt scheduled in %d seconds",
+                    self.reconnect_interval,
+                )
+
+            raise UpdateFailed(f"Error fetching PhoneTrack data: {err}") from err
+
+
+class PhoneTrackDevice(CoordinatorEntity, TrackerEntity):
+    """A device tracker using PhoneTrack data."""
+
+    _attr_has_entity_name = True
+    _attr_name = None
+    _attr_tracker_source_type = "gps"
+    _attr_tracking_type = "position"
+
+    def __init__(
+        self, coordinator: PhoneTrackDataUpdateCoordinator, device: str, entry_id: str
+    ) -> None:
+        """Initialize the device tracker."""
+        super().__init__(coordinator)
+        self.device = device
+        self._attr_unique_id = f"{entry_id}_{device}"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, self._attr_unique_id)},
+            "name": device,
+            "manufacturer": "PhoneTrack",
+        }
+
+    @property
+    def available(self) -> bool:
+        """Return if entity is available."""
+        return self.coordinator.last_update_success
+
+    @property
+    def battery_level(self) -> int | None:
+        """Return the battery level of the device."""
+        if self.coordinator.data is None:
+            return None
+        if self.device not in self.coordinator.data:
+            return None
+        return self.coordinator.data[self.device].get("batterylevel")
+
+    @property
+    def in_zones(self) -> list[str] | None:
+        """Return the zones the device is currently in."""
+        # PhoneTrack doesn't provide zone information directly
+        # We'll let Home Assistant determine zones based on coordinates
+        return None
+
+    @property
+    def latitude(self) -> float | None:
+        """Return latitude value of the device."""
+        if self.coordinator.data is None:
+            return None
+        if self.device not in self.coordinator.data:
+            return None
+        lat = self.coordinator.data[self.device].get("lat")
+        return float(lat) if lat is not None else None
+
+    @property
+    def longitude(self) -> float | None:
+        """Return longitude value of the device."""
+        if self.coordinator.data is None:
+            return None
+        if self.device not in self.coordinator.data:
+            return None
+        lon = self.coordinator.data[self.device].get("lon")
+        return float(lon) if lon is not None else None
+
+    @property
+    def location_accuracy(self) -> float:
+        """Return the gps accuracy of the device."""
+        if self.coordinator.data is None:
+            return 0
+        if self.device not in self.coordinator.data:
+            return 0
+        return self.coordinator.data[self.device].get("accuracy", 0)
+
+    @callback
+    def _async_update_attrs(self) -> None:
+        """Update attributes from coordinator data."""
+        if self.coordinator.data is None:
+            return
+        if self.device not in self.coordinator.data:
+            return
+
+        device_data = self.coordinator.data[self.device]
+
+        # Check GPS accuracy if configured
+        max_accuracy = self.coordinator.max_gps_accuracy
+        if (
+            max_accuracy is not None
+            and device_data.get("accuracy", 0) > max_accuracy
+        ):
+            _LOGGER.info(
+                "Skipping update for %s because GPS accuracy (%s) is not met (max: %s)",
+                self.device,
+                device_data.get("accuracy"),
+                max_accuracy,
             )
-        return True
+            return
 
+        self.async_write_ha_state()
+
+    async def async_added_to_hass(self) -> None:
+        """When entity is added to hass."""
+        await super().async_added_to_hass()
+        self._async_update_attrs()
+
+    async def async_update(self) -> None:
+        """Update the entity."""
+        await self.coordinator.async_request_refresh()

@@ -3,10 +3,11 @@
   "name": "PhoneTrack",
   "documentation": "https://github.com/j1nx/homeassistant-phonetrack",
   "requirements": [],
-  "version": "1.0.0",
+  "version": "1.1.0",
   "dependencies": [],
   "codeowners": [
     "@Phyks",
     "@j1nx"
-  ]
+  ],
+  "config_flow": true
 }
