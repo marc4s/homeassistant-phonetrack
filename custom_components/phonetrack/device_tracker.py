@@ -224,15 +224,6 @@ class PhoneTrackDevice(CoordinatorEntity, TrackerEntity):
         return self.coordinator.last_update_success
 
     @property
-    def _attr_battery_level(self) -> int | None:
-        """Return the battery level of the device."""
-        if self.coordinator.data is None:
-            return None
-        if self.device not in self.coordinator.data:
-            return None
-        return self.coordinator.data[self.device].get("batterylevel")
-
-    @property
     def in_zones(self) -> list[str] | None:
         """Return the zones the device is currently in."""
         # PhoneTrack doesn't provide zone information directly
