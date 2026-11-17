@@ -52,10 +52,16 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         new_data = {**entry.data}
 
         # Add default reconnect interval if not present
-        from .const import CONF_RECONNECT_INTERVAL, DEFAULT_RECONNECT_INTERVAL
+        from .const import CONF_DEVICES, CONF_RECONNECT_INTERVAL, DEFAULT_RECONNECT_INTERVAL
 
         if CONF_RECONNECT_INTERVAL not in new_data:
             new_data[CONF_RECONNECT_INTERVAL] = DEFAULT_RECONNECT_INTERVAL
+
+        # Convert devices from string to list if needed (for legacy format)
+        devices = new_data.get(CONF_DEVICES, [])
+        if isinstance(devices, str):
+            # Split the string by comma and strip whitespace
+            new_data[CONF_DEVICES] = [d.strip() for d in devices.split(",") if d.strip()]
 
         hass.config_entries.async_update_entry(
             entry,

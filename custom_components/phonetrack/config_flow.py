@@ -1,7 +1,9 @@
 """Config flow for phonetrack component."""
+import logging
+
 import voluptuous as vol
 from homeassistant import config_entries
-from homeassistant.const import CONF_DEVICES, CONF_TOKEN, CONF_URL
+from homeassistant.const import CONF_TOKEN, CONF_URL
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 import requests
@@ -18,11 +20,12 @@ from .const import (
     DOMAIN,
 )
 
+_LOGGER = logging.getLogger(__name__)
+
 DATA_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_URL): str,
         vol.Required(CONF_TOKEN): str,
-        vol.Optional(CONF_DEVICES, default=""): str,
         vol.Optional(
             CONF_RECONNECT_INTERVAL, default=DEFAULT_RECONNECT_INTERVAL
         ): vol.Coerce(int),
@@ -37,6 +40,25 @@ DATA_SCHEMA = vol.Schema(
         ): vol.Coerce(float),
     }
 )
+
+
+async def async_get_available_devices(hass: HomeAssistant, url: str, token: str) -> list[str]:
+    """Get available devices from the PhoneTrack server."""
+    try:
+        url_full = f"{url}/{token}"
+        response = await hass.async_add_executor_job(
+            requests.get, url_full, {"timeout": 10}
+        )
+        response.raise_for_status()
+        data = response.json()
+        
+        # Get devices from the response - data[token] is a dict with device names as keys
+        if token in data:
+            return list(data[token].keys())
+        return []
+    except Exception as err:  # pylint: disable=broad-except
+        _LOGGER.warning("Could not fetch devices: %s", err)
+        return []
 
 
 async def validate_input(hass: HomeAssistant, data: dict) -> dict:
@@ -77,6 +99,9 @@ class PhoneTrackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             try:
                 info = await validate_input(self.hass, user_input)
+                devices = await async_get_available_devices(
+                    self.hass, user_input[CONF_URL], user_input[CONF_TOKEN]
+                )
             except CannotConnect:
                 errors["base"] = "cannot_connect"
             except InvalidUrl:
@@ -84,6 +109,8 @@ class PhoneTrackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except Exception:  # pylint: disable=broad-except
                 errors["base"] = "unknown"
             else:
+                # Store devices as a list
+                user_input[CONF_DEVICES] = devices
                 return self.async_create_entry(
                     title=info["title"],
                     data=user_input,
@@ -103,6 +130,9 @@ class PhoneTrackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             try:
                 info = await validate_input(self.hass, user_input)
+                devices = await async_get_available_devices(
+                    self.hass, user_input[CONF_URL], user_input[CONF_TOKEN]
+                )
             except CannotConnect:
                 errors["base"] = "cannot_connect"
             except InvalidUrl:
@@ -110,6 +140,8 @@ class PhoneTrackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except Exception:  # pylint: disable=broad-except
                 errors["base"] = "unknown"
             else:
+                # Store devices as a list
+                user_input[CONF_DEVICES] = devices
                 self.hass.config_entries.async_update_entry(
                     reconfigure_entry,
                     data=user_input,
@@ -127,10 +159,6 @@ class PhoneTrackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ): str,
                 vol.Required(
                     CONF_TOKEN, default=reconfigure_entry.data.get(CONF_TOKEN, "")
-                ): str,
-                vol.Optional(
-                    CONF_DEVICES,
-                    default=reconfigure_entry.data.get(CONF_DEVICES, ""),
                 ): str,
                 vol.Optional(
                     CONF_RECONNECT_INTERVAL,
