@@ -24,7 +24,8 @@ regards
 
 ### Add/Setup the integration
 - use the setup flow
-URL should be something like
+- you can put a full URL as well as just the servername it will try to obtain the correct url
+otherwise the url is something like:
 https://NEXTCLOUDHOST/index.php/apps/phonetrack/api/getlastpositions/
 - report issues if you have some
 

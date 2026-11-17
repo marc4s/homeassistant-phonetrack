@@ -227,7 +227,14 @@ class PhoneTrackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Handle reconfiguration of the integration."""
         _LOGGER.debug("async_step_reconfigure called with user_input: %s", user_input)
-        reconfigure_entry = self._async_get_entry()
+        
+        try:
+            reconfigure_entry = self._async_get_entry()
+        except Exception as err:
+            _LOGGER.error("Failed to get reconfigure entry: %s", err)
+            return self.async_abort(reason="reconfigure_failed")
+
+        _LOGGER.debug("Reconfigure entry data: %s", reconfigure_entry.data)
 
         errors = {}
         if user_input is not None:
@@ -238,7 +245,7 @@ class PhoneTrackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 
                 _LOGGER.debug("Fetching available devices for reconfiguration...")
                 devices = await async_get_available_devices(
-                    self.hass, user_input[CONF_URL], user_input[CONF_TOKEN], user_input.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)
+                    self.hass, info.get("actual_url", user_input[CONF_URL]), user_input[CONF_TOKEN], user_input.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)
                 )
                 _LOGGER.debug("Available devices: %s", devices)
             except CannotConnect as err:
@@ -255,6 +262,7 @@ class PhoneTrackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             else:
                 # Store devices as a list
                 user_input[CONF_DEVICES] = devices
+                user_input[CONF_URL] = info.get("actual_url", user_input[CONF_URL])
                 _LOGGER.info(
                     "Reconfiguration successful. URL: %s, Devices: %s",
                     user_input[CONF_URL],
@@ -269,9 +277,12 @@ class PhoneTrackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     description_placeholders={"name": reconfigure_entry.title},
                 )
 
-        # Pre-populate with existing values
+        # Pre-populate with existing values - use the main DATA_SCHEMA with defaults
         data_schema = vol.Schema(
             {
+                vol.Optional(
+                    CONF_NAME, default=reconfigure_entry.data.get(CONF_NAME, DEFAULT_NAME)
+                ): str,
                 vol.Required(
                     CONF_URL, default=reconfigure_entry.data.get(CONF_URL, "")
                 ): str,
@@ -279,36 +290,25 @@ class PhoneTrackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_TOKEN, default=reconfigure_entry.data.get(CONF_TOKEN, "")
                 ): str,
                 vol.Optional(
-                    CONF_NAME, default=reconfigure_entry.data.get(CONF_NAME, DEFAULT_NAME)
-                ): str,
-                vol.Optional(
                     CONF_VERIFY_SSL,
                     default=reconfigure_entry.data.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL),
                 ): bool,
                 vol.Optional(
                     CONF_RECONNECT_INTERVAL,
-                    default=reconfigure_entry.data.get(
-                        CONF_RECONNECT_INTERVAL, DEFAULT_RECONNECT_INTERVAL
-                    ),
-                ): vol.Coerce(int),
+                    default=reconfigure_entry.data.get(CONF_RECONNECT_INTERVAL, DEFAULT_RECONNECT_INTERVAL),
+                ): int,
                 vol.Optional(
                     CONF_UPDATE_TIME_MINUTES,
-                    default=reconfigure_entry.data.get(
-                        CONF_UPDATE_TIME_MINUTES, DEFAULT_UPDATE_TIME_MINUTES
-                    ),
-                ): vol.Coerce(int),
+                    default=reconfigure_entry.data.get(CONF_UPDATE_TIME_MINUTES, DEFAULT_UPDATE_TIME_MINUTES),
+                ): int,
                 vol.Optional(
                     CONF_UPDATE_TIME_SECONDS,
-                    default=reconfigure_entry.data.get(
-                        CONF_UPDATE_TIME_SECONDS, DEFAULT_UPDATE_TIME_SECONDS
-                    ),
-                ): vol.Coerce(int),
+                    default=reconfigure_entry.data.get(CONF_UPDATE_TIME_SECONDS, DEFAULT_UPDATE_TIME_SECONDS),
+                ): int,
                 vol.Optional(
                     CONF_MAX_GPS_ACCURACY,
-                    default=reconfigure_entry.data.get(
-                        CONF_MAX_GPS_ACCURACY, DEFAULT_MAX_GPS_ACCURACY
-                    ),
-                ): vol.Coerce(float),
+                    default=reconfigure_entry.data.get(CONF_MAX_GPS_ACCURACY, DEFAULT_MAX_GPS_ACCURACY),
+                ): float,
             }
         )
 
