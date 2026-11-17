@@ -11,9 +11,11 @@ CONF_MAX_GPS_ACCURACY = "max_gps_accuracy"
 CONF_UPDATE_TIME_MINUTES = "update_time_minutes"
 CONF_UPDATE_TIME_SECONDS = "update_time_seconds"
 CONF_RECONNECT_INTERVAL = "reconnect_interval"
+CONF_NAME = "name"
 CONF_VERIFY_SSL = "verify_ssl"
 
 # Default values
+DEFAULT_NAME = "PhoneTrack"
 DEFAULT_UPDATE_TIME_MINUTES = 5
 DEFAULT_UPDATE_TIME_SECONDS = 0
 DEFAULT_MAX_GPS_ACCURACY = 100000

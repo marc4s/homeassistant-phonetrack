@@ -10,11 +10,13 @@ import requests
 
 from .const import (
     CONF_MAX_GPS_ACCURACY,
+    CONF_NAME,
     CONF_RECONNECT_INTERVAL,
     CONF_UPDATE_TIME_MINUTES,
     CONF_UPDATE_TIME_SECONDS,
     CONF_VERIFY_SSL,
     DEFAULT_MAX_GPS_ACCURACY,
+    DEFAULT_NAME,
     DEFAULT_RECONNECT_INTERVAL,
     DEFAULT_UPDATE_TIME_MINUTES,
     DEFAULT_UPDATE_TIME_SECONDS,
@@ -26,6 +28,7 @@ _LOGGER = logging.getLogger(__name__)
 
 DATA_SCHEMA = vol.Schema(
     {
+        vol.Optional(CONF_NAME, default=""): str,
         vol.Required(CONF_URL): str,
         vol.Required(CONF_TOKEN): str,
         vol.Optional(
@@ -45,6 +48,75 @@ DATA_SCHEMA = vol.Schema(
         ): vol.Coerce(float),
     }
 )
+
+
+async def async_test_url(hass: HomeAssistant, url: str, token: str, verify_ssl: bool) -> tuple[bool, str]:
+    """Test a URL and return (success, actual_url)."""
+    try:
+        url_full = f"{url}/{token}"
+        _LOGGER.debug("Testing URL: %s", url_full)
+        response = await hass.async_add_executor_job(
+            requests.get, url_full, {"timeout": 10, "verify": verify_ssl}
+        )
+        response.raise_for_status()
+        data = response.json()
+        if token in data:
+            _LOGGER.debug("Successfully connected to URL: %s", url)
+            return True, url
+        return False, f"Token not found in response for {url}"
+    except requests.exceptions.RequestException as err:
+        _LOGGER.debug("Failed to connect to %s: %s", url, err)
+        return False, str(err)
+    except ValueError as err:
+        _LOGGER.debug("Invalid JSON response from %s: %s", url, err)
+        return False, str(err)
+
+
+async def async_test_url_with_fallback(hass: HomeAssistant, base_url: str, token: str, verify_ssl: bool) -> tuple[bool, str, str]:
+    """Try multiple URL formats and return (success, actual_url, error_message)."""
+    _LOGGER.debug("Testing URL with fallback for base: %s", base_url)
+    
+    # If URL already looks complete, just test it
+    if base_url.endswith("/"):
+        base_url = base_url.rstrip("/")
+    
+    # Build variations
+    url_variants = []
+    path_variants = [
+        "/index.php/apps/phonetrack/api/getlastpositions",
+        "/apps/phonetrack/api/getlastpositions",
+        "/index.php/apps/phonetrack/api/getlastpositions/",
+        "/apps/phonetrack/api/getlastpositions/",
+    ]
+    
+    for path in path_variants:
+        url_variants.append(f"https://{base_url}{path}")
+        url_variants.append(f"http://{base_url}{path}")
+    
+    # Also try the base URL with token appended directly
+    url_variants.append(f"https://{base_url}/{token}")
+    url_variants.append(f"http://{base_url}/{token}")
+    
+    # If it looks like a full URL, try it as-is first
+    if base_url.startswith(("http://", "https://")):
+        url_variants.insert(0, base_url)
+    
+    # Remove duplicates while preserving order
+    seen = set()
+    url_variants = [u for u in url_variants if not (u in seen or seen.add(u))]
+    
+    _LOGGER.debug("URL variants to try: %s", url_variants)
+    
+    for url in url_variants:
+        success, result = await async_test_url(hass, url, token, verify_ssl)
+        if success:
+            _LOGGER.info("Successfully connected using URL: %s", url)
+            return True, url, ""
+    
+    # If we get here, all attempts failed
+    error_msg = result if not url_variants else f"Could not connect with any URL variant"
+    _LOGGER.error("All URL attempts failed: %s", error_msg)
+    return False, "", error_msg
 
 
 async def async_get_available_devices(hass: HomeAssistant, url: str, token: str, verify_ssl: bool = True) -> list[str]:
@@ -74,26 +146,24 @@ async def validate_input(hass: HomeAssistant, data: dict) -> dict:
 
     Data has the keys from DATA_SCHEMA with values provided by the user.
     """
-    # Validate the URL format
-    if not data[CONF_URL].startswith(("http://", "https://")):
-        raise InvalidUrl
-
+    url = data[CONF_URL]
+    token = data[CONF_TOKEN]
     verify_ssl = data.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)
-    _LOGGER.debug("validate_input with verify_ssl=%s", verify_ssl)
+    _LOGGER.debug("validate_input with url=%s, verify_ssl=%s", url, verify_ssl)
 
-    # Test connection to PhoneTrack server
-    try:
-        # Create a test request to verify connection
-        url = f"{data[CONF_URL]}/{data[CONF_TOKEN]}"
-        response = await hass.async_add_executor_job(
-            requests.get, url, {"timeout": 10, "verify": verify_ssl}
-        )
-        response.raise_for_status()
-    except requests.exceptions.RequestException as err:
-        _LOGGER.error("Connection test failed: %s", err)
-        raise CannotConnect from err
+    # Test connection to PhoneTrack server with URL fallback
+    success, actual_url, error_msg = await async_test_url_with_fallback(
+        hass, url, token, verify_ssl
+    )
+    
+    if not success:
+        _LOGGER.error("Connection test failed: %s", error_msg)
+        raise CannotConnect(error_msg)
 
-    return {"title": data[CONF_URL]}
+    _LOGGER.info("Successfully connected to PhoneTrack at %s", actual_url)
+    
+    # Return the actual working URL
+    return {"title": data.get(CONF_NAME, actual_url).strip() or actual_url, "actual_url": actual_url}
 
 
 class PhoneTrackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -117,7 +187,7 @@ class PhoneTrackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 
                 _LOGGER.debug("Fetching available devices...")
                 devices = await async_get_available_devices(
-                    self.hass, user_input[CONF_URL], user_input[CONF_TOKEN], user_input.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)
+                    self.hass, info.get("actual_url", user_input[CONF_URL]), user_input[CONF_TOKEN], user_input.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)
                 )
                 _LOGGER.debug("Available devices: %s", devices)
             except CannotConnect as err:
@@ -134,10 +204,13 @@ class PhoneTrackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             else:
                 # Store devices as a list
                 user_input[CONF_DEVICES] = devices
+                user_input[CONF_NAME] = info["title"]
+                user_input[CONF_URL] = info.get("actual_url", user_input[CONF_URL])
                 _LOGGER.info(
-                    "Configuration successful. URL: %s, Devices: %s",
+                    "Configuration successful. URL: %s, Devices: %s, Name: %s",
                     user_input[CONF_URL],
                     devices,
+                    info["title"],
                 )
                 return self.async_create_entry(
                     title=info["title"],
@@ -204,6 +277,9 @@ class PhoneTrackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ): str,
                 vol.Required(
                     CONF_TOKEN, default=reconfigure_entry.data.get(CONF_TOKEN, "")
+                ): str,
+                vol.Optional(
+                    CONF_NAME, default=reconfigure_entry.data.get(CONF_NAME, DEFAULT_NAME)
                 ): str,
                 vol.Optional(
                     CONF_VERIFY_SSL,
