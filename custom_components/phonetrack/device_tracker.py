@@ -155,8 +155,15 @@ class PhoneTrackDataUpdateCoordinator(DataUpdateCoordinator):
 
         # Use asyncio.to_thread for sync requests
         def fetch_data():
-            url = urllib.parse.urljoin(self.url, self.token)
-            response = requests.get(url, timeout=30, verify=self.verify_ssl)
+            # Ensure the URL ends with /getlastpositions/ before appending token
+            url = self.url
+            if not url.endswith("/getlastpositions") and not url.endswith("/getlastpositions/"):
+                url = url.rstrip("/") + "/getlastpositions"
+            
+            # Build the full URL by appending the token
+            url_full = url.rstrip("/") + "/" + self.token
+            _LOGGER.debug("Fetching data from: %s", url_full)
+            response = requests.get(url_full, timeout=30, verify=self.verify_ssl)
             response.raise_for_status()
             return response.json()
 

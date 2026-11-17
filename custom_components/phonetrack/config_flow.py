@@ -53,6 +53,9 @@ DATA_SCHEMA = vol.Schema(
 async def async_test_url(hass: HomeAssistant, url: str, token: str, verify_ssl: bool) -> tuple[bool, str]:
     """Test a URL and return (success, actual_url)."""
     try:
+        # Remove trailing slash from URL if present
+        url = url.rstrip("/")
+        # Build the full endpoint URL with token
         url_full = f"{url}/{token}"
         _LOGGER.debug("Testing URL: %s", url_full)
         response = await hass.async_add_executor_job(
@@ -61,14 +64,14 @@ async def async_test_url(hass: HomeAssistant, url: str, token: str, verify_ssl: 
         response.raise_for_status()
         data = response.json()
         if token in data:
-            _LOGGER.debug("Successfully connected to URL: %s", url)
-            return True, url
-        return False, f"Token not found in response for {url}"
+            _LOGGER.debug("Successfully connected to URL: %s", url_full)
+            return True, url_full
+        return False, f"Token not found in response for {url_full}"
     except requests.exceptions.RequestException as err:
-        _LOGGER.debug("Failed to connect to %s: %s", url, err)
+        _LOGGER.debug("Failed to connect to %s: %s", url_full, err)
         return False, str(err)
     except ValueError as err:
-        _LOGGER.debug("Invalid JSON response from %s: %s", url, err)
+        _LOGGER.debug("Invalid JSON response from %s: %s", url_full, err)
         return False, str(err)
 
 
@@ -77,29 +80,23 @@ async def async_test_url_with_fallback(hass: HomeAssistant, base_url: str, token
     _LOGGER.debug("Testing URL with fallback for base: %s", base_url)
     
     # If URL already looks complete, just test it
-    if base_url.endswith("/"):
-        base_url = base_url.rstrip("/")
+    base_url = base_url.rstrip("/")
     
-    # Build variations
+    # Build variations - try the correct endpoint path with token appended
     url_variants = []
-    path_variants = [
-        "/index.php/apps/phonetrack/api/getlastpositions",
-        "/apps/phonetrack/api/getlastpositions",
-        "/index.php/apps/phonetrack/api/getlastpositions/",
-        "/apps/phonetrack/api/getlastpositions/",
-    ]
     
-    for path in path_variants:
-        url_variants.append(f"https://{base_url}{path}")
-        url_variants.append(f"http://{base_url}{path}")
-    
-    # Also try the base URL with token appended directly
-    url_variants.append(f"https://{base_url}/{token}")
-    url_variants.append(f"http://{base_url}/{token}")
-    
-    # If it looks like a full URL, try it as-is first
+    # If base_url already contains a path, test it as-is first
     if base_url.startswith(("http://", "https://")):
-        url_variants.insert(0, base_url)
+        # Check if it looks like a full URL (ends with /api/... or /index.php/...)
+        if "index.php" in base_url or "/api/" in base_url:
+            # It's a full URL, just add it
+            url_variants.append(base_url)
+        else:
+            # It's a servername without path, add the full URL variations
+            url_variants.append(f"{base_url}/index.php/apps/phonetrack/api/getlastpositions")
+            url_variants.append(f"{base_url}/apps/phonetrack/api/getlastpositions")
+            url_variants.append(f"{base_url}/index.php/apps/phonetrack/api/getlastpositions/")
+            url_variants.append(f"{base_url}/apps/phonetrack/api/getlastpositions/")
     
     # Remove duplicates while preserving order
     seen = set()
@@ -114,7 +111,7 @@ async def async_test_url_with_fallback(hass: HomeAssistant, base_url: str, token
             return True, url, ""
     
     # If we get here, all attempts failed
-    error_msg = result if not url_variants else f"Could not connect with any URL variant"
+    error_msg = result if url_variants else "No URL variants to try"
     _LOGGER.error("All URL attempts failed: %s", error_msg)
     return False, "", error_msg
 
@@ -123,7 +120,13 @@ async def async_get_available_devices(hass: HomeAssistant, url: str, token: str,
     """Get available devices from the PhoneTrack server."""
     _LOGGER.debug("Fetching devices from %s with verify_ssl=%s", url, verify_ssl)
     try:
+        # Ensure the URL ends with /getlastpositions/ before appending token
+        # If the URL doesn't end with /getlastpositions, add it
+        if not url.endswith("/getlastpositions") and not url.endswith("/getlastpositions/"):
+            url = url.rstrip("/") + "/getlastpositions"
+        
         url_full = f"{url}/{token}"
+        _LOGGER.debug("Fetching devices from: %s", url_full)
         response = await hass.async_add_executor_job(
             requests.get, url_full, {"timeout": 10, "verify": verify_ssl}
         )
