@@ -11,12 +11,14 @@ CONF_MAX_GPS_ACCURACY = "max_gps_accuracy"
 CONF_UPDATE_TIME_MINUTES = "update_time_minutes"
 CONF_UPDATE_TIME_SECONDS = "update_time_seconds"
 CONF_RECONNECT_INTERVAL = "reconnect_interval"
+CONF_VERIFY_SSL = "verify_ssl"
 
 # Default values
 DEFAULT_UPDATE_TIME_MINUTES = 5
 DEFAULT_UPDATE_TIME_SECONDS = 0
 DEFAULT_MAX_GPS_ACCURACY = 100000
 DEFAULT_RECONNECT_INTERVAL = 300  # seconds
+DEFAULT_VERIFY_SSL = True
 
 # Update intervals
 MIN_UPDATE_INTERVAL = timedelta(seconds=30)  # Minimum 30 seconds

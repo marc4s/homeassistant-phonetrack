@@ -17,25 +17,16 @@ I just took his code, converted it top the new(er) structure and adjusted it hea
 regards
 
 ## Setup instructions
-### Copying into custom_components folder
-Create a directory `custom_components` in your Home-Assistant configuration directory.
-Copy the whole [phonetrack](./phonetrack) folder from this project into the newly created directory `custom_components`.
-
-The result of your copy action(s) should yield a directory structure like so:
-
-```
-.homeassistant/
-|-- custom_components/
-|   |-- phonetrack/
-|       |-- __init__.py
-|       |-- device_tracker.py
-|       |-- manifest.json
-```
+- manually remove the old phonetrack component from custom_components and comment out your old configuration from configuration.yaml
 
 ### Enabling the custom_component
-- manually remove the old phonetrack component from custom_components and comment out your old configuration from configuration.yaml
-- install via marketplace
+- Add this repo-url https://github.com/marc4s/homeassistant-phonetrack to your marketplace and install 
+
+### Add/Setup the integration
 - use the setup flow
+URL should be something like
+https://NEXTCLOUDHOST/index.php/apps/phonetrack/api/getlastpositions/
+- report issues if you have some
 
 
 ## ✅ Completed Improvements

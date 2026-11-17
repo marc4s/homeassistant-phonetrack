@@ -23,10 +23,12 @@ from .const import (
     CONF_URL,
     CONF_UPDATE_TIME_MINUTES,
     CONF_UPDATE_TIME_SECONDS,
+    CONF_VERIFY_SSL,
     DEFAULT_MAX_GPS_ACCURACY,
     DEFAULT_RECONNECT_INTERVAL,
     DEFAULT_UPDATE_TIME_MINUTES,
     DEFAULT_UPDATE_TIME_SECONDS,
+    DEFAULT_VERIFY_SSL,
     DOMAIN,
 )
 
@@ -136,11 +138,14 @@ class PhoneTrackDataUpdateCoordinator(DataUpdateCoordinator):
         self.reconnect_interval = config.get(
             CONF_RECONNECT_INTERVAL, DEFAULT_RECONNECT_INTERVAL
         )
+        self.verify_ssl = config.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)
+        _LOGGER.debug("verify_ssl set to: %s", self.verify_ssl)
         self._connected = True  # Start assuming connected
         _LOGGER.debug(
-            "Coordinator initialized with URL: %s, devices: %s",
+            "Coordinator initialized with URL: %s, devices: %s, verify_ssl: %s",
             self.url,
             self.devices,
+            self.verify_ssl,
         )
 
     async def _async_update_data(self) -> dict[str, Any]:
@@ -151,7 +156,7 @@ class PhoneTrackDataUpdateCoordinator(DataUpdateCoordinator):
         # Use asyncio.to_thread for sync requests
         def fetch_data():
             url = urllib.parse.urljoin(self.url, self.token)
-            response = requests.get(url, timeout=30)
+            response = requests.get(url, timeout=30, verify=self.verify_ssl)
             response.raise_for_status()
             return response.json()
 
@@ -219,7 +224,7 @@ class PhoneTrackDevice(CoordinatorEntity, TrackerEntity):
         return self.coordinator.last_update_success
 
     @property
-    def battery_level(self) -> int | None:
+    def _attr_battery_level(self) -> int | None:
         """Return the battery level of the device."""
         if self.coordinator.data is None:
             return None

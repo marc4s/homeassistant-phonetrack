@@ -13,10 +13,12 @@ from .const import (
     CONF_RECONNECT_INTERVAL,
     CONF_UPDATE_TIME_MINUTES,
     CONF_UPDATE_TIME_SECONDS,
+    CONF_VERIFY_SSL,
     DEFAULT_MAX_GPS_ACCURACY,
     DEFAULT_RECONNECT_INTERVAL,
     DEFAULT_UPDATE_TIME_MINUTES,
     DEFAULT_UPDATE_TIME_SECONDS,
+    DEFAULT_VERIFY_SSL,
     DOMAIN,
 )
 
@@ -26,6 +28,9 @@ DATA_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_URL): str,
         vol.Required(CONF_TOKEN): str,
+        vol.Optional(
+            CONF_VERIFY_SSL, default=DEFAULT_VERIFY_SSL
+        ): bool,
         vol.Optional(
             CONF_RECONNECT_INTERVAL, default=DEFAULT_RECONNECT_INTERVAL
         ): vol.Coerce(int),
@@ -42,22 +47,25 @@ DATA_SCHEMA = vol.Schema(
 )
 
 
-async def async_get_available_devices(hass: HomeAssistant, url: str, token: str) -> list[str]:
+async def async_get_available_devices(hass: HomeAssistant, url: str, token: str, verify_ssl: bool = True) -> list[str]:
     """Get available devices from the PhoneTrack server."""
+    _LOGGER.debug("Fetching devices from %s with verify_ssl=%s", url, verify_ssl)
     try:
         url_full = f"{url}/{token}"
         response = await hass.async_add_executor_job(
-            requests.get, url_full, {"timeout": 10}
+            requests.get, url_full, {"timeout": 10, "verify": verify_ssl}
         )
         response.raise_for_status()
         data = response.json()
         
         # Get devices from the response - data[token] is a dict with device names as keys
         if token in data:
+            _LOGGER.debug("Found %d devices", len(data[token].keys()))
             return list(data[token].keys())
+        _LOGGER.warning("Token %s not found in server response", token)
         return []
     except Exception as err:  # pylint: disable=broad-except
-        _LOGGER.warning("Could not fetch devices: %s", err)
+        _LOGGER.error("Could not fetch devices: %s", err)
         return []
 
 
@@ -70,15 +78,19 @@ async def validate_input(hass: HomeAssistant, data: dict) -> dict:
     if not data[CONF_URL].startswith(("http://", "https://")):
         raise InvalidUrl
 
+    verify_ssl = data.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)
+    _LOGGER.debug("validate_input with verify_ssl=%s", verify_ssl)
+
     # Test connection to PhoneTrack server
     try:
         # Create a test request to verify connection
         url = f"{data[CONF_URL]}/{data[CONF_TOKEN]}"
         response = await hass.async_add_executor_job(
-            requests.get, url, {"timeout": 10}
+            requests.get, url, {"timeout": 10, "verify": verify_ssl}
         )
         response.raise_for_status()
     except requests.exceptions.RequestException as err:
+        _LOGGER.error("Connection test failed: %s", err)
         raise CannotConnect from err
 
     return {"title": data[CONF_URL]}
@@ -105,7 +117,7 @@ class PhoneTrackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 
                 _LOGGER.debug("Fetching available devices...")
                 devices = await async_get_available_devices(
-                    self.hass, user_input[CONF_URL], user_input[CONF_TOKEN]
+                    self.hass, user_input[CONF_URL], user_input[CONF_TOKEN], user_input.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)
                 )
                 _LOGGER.debug("Available devices: %s", devices)
             except CannotConnect as err:
@@ -153,7 +165,7 @@ class PhoneTrackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 
                 _LOGGER.debug("Fetching available devices for reconfiguration...")
                 devices = await async_get_available_devices(
-                    self.hass, user_input[CONF_URL], user_input[CONF_TOKEN]
+                    self.hass, user_input[CONF_URL], user_input[CONF_TOKEN], user_input.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)
                 )
                 _LOGGER.debug("Available devices: %s", devices)
             except CannotConnect as err:
@@ -193,6 +205,10 @@ class PhoneTrackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(
                     CONF_TOKEN, default=reconfigure_entry.data.get(CONF_TOKEN, "")
                 ): str,
+                vol.Optional(
+                    CONF_VERIFY_SSL,
+                    default=reconfigure_entry.data.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL),
+                ): bool,
                 vol.Optional(
                     CONF_RECONNECT_INTERVAL,
                     default=reconfigure_entry.data.get(
