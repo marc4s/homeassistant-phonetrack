@@ -64,14 +64,14 @@ async def async_test_url(hass: HomeAssistant, url: str, token: str, verify_ssl: 
         response.raise_for_status()
         data = response.json()
         if token in data:
-            _LOGGER.debug("Successfully connected to URL: %s", url_full)
-            return True, url_full
+            _LOGGER.debug("Successfully connected to URL: %s", url)
+            return True, url
         return False, f"Token not found in response for {url_full}"
     except requests.exceptions.RequestException as err:
-        _LOGGER.debug("Failed to connect to %s: %s", url_full, err)
+        _LOGGER.debug("Failed to connect to %s: %s", url, err)
         return False, str(err)
     except ValueError as err:
-        _LOGGER.debug("Invalid JSON response from %s: %s", url_full, err)
+        _LOGGER.debug("Invalid JSON response from %s: %s", url, err)
         return False, str(err)
 
 
@@ -165,8 +165,14 @@ async def validate_input(hass: HomeAssistant, data: dict) -> dict:
 
     _LOGGER.info("Successfully connected to PhoneTrack at %s", actual_url)
     
+    # Use the configured name as title, fallback to "PhoneTrack" or actual_url
+    name = data.get(CONF_NAME, "").strip()
+    if not name:
+        # Use a default name if none provided
+        name = "PhoneTrack"
+    
     # Return the actual working URL
-    return {"title": data.get(CONF_NAME, actual_url).strip() or actual_url, "actual_url": actual_url}
+    return {"title": name, "actual_url": actual_url}
 
 
 class PhoneTrackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -215,6 +221,9 @@ class PhoneTrackConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     devices,
                     info["title"],
                 )
+                # Create the entry with the configured title
+                # async_create_entry returns None, so we can't update after creation
+                # Instead, we rely on the title parameter being set correctly
                 return self.async_create_entry(
                     title=info["title"],
                     data=user_input,
