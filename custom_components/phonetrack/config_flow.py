@@ -28,7 +28,7 @@ _LOGGER = logging.getLogger(__name__)
 
 DATA_SCHEMA = vol.Schema(
     {
-        vol.Optional(CONF_NAME, default=""): str,
+        vol.Optional(CONF_NAME, default="PhoneTrack"): str,
         vol.Required(CONF_URL): str,
         vol.Required(CONF_TOKEN): str,
         vol.Optional(
