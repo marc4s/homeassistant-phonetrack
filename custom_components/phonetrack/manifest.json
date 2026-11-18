@@ -1,14 +1,14 @@
 {
   "domain": "phonetrack",
   "name": "PhoneTrack",
+  "categories": [
+    "presence_location.trackers",
+    "sensors"
+  ],
   "codeowners": [
     "@Phyks",
     "@j1nx",
     "@marc4s"
-  ],
-  "categories": [
-    "presence_location.trackers",
-    "sensors"
   ],
   "config_flow": true,
   "dependencies": [],
