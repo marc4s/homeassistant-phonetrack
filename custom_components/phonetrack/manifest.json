@@ -2,13 +2,19 @@
   "domain": "phonetrack",
   "name": "PhoneTrack",
   "documentation": "https://github.com/marc4s/homeassistant-phonetrack",
+  "integration_type": "hub",
+  "iot_class": "local_polling",
   "requirements": [],
   "version": "1.1.1",
   "dependencies": [],
   "codeowners": [
     "@Phyks",
     "@j1nx",
-    "marc4s"
+    "@marc4s"
   ],
+  "categories": [
+    "presence_location.trackers",
+    "sensors"
+  ]
   "config_flow": true
 }
